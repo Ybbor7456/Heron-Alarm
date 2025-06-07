@@ -38,6 +38,8 @@ on throughout my college courses. However, I misjudged what microcontrollers I h
 the ATMEGA328pb Xplained Miniboard and not the expected arduino r3. The ATMEGA328pb is not ideal for the experimentation
 process but will likely be the MCU I use for the final product. Arduino Uno R3 is much more ideal for experimentation. 
 
+# Arduino R3, PIR HC-SR501 motion detector, active piezo buzzer.#
+
 # 06/06/25
 The Arduino board came in the mail today. 
 Uploaded basic code from ArduinoIDE to test. Everything seems to work. 
@@ -47,6 +49,10 @@ must find a good method for adjusting its total perception, perhaps use a pipe o
 future. 
 
 ![10000021251](https://github.com/user-attachments/assets/c425c2f2-c160-4698-9f74-214f9343d6c9)
+
+
+# 06/07/25
+
 
 
 
