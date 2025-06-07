@@ -38,7 +38,13 @@ on throughout my college courses. However, I misjudged what microcontrollers I h
 the ATMEGA328pb Xplained Miniboard and not the expected arduino r3. The ATMEGA328pb is not ideal for the experimentation
 process but will likely be the MCU I use for the final product. Arduino Uno R3 is much more ideal for experimentation. 
 
-
+# 06/06/25
+The Arduino board came in the mail today. 
+Uploaded basic code from ArduinoIDE to test. Everything seems to work. 
+Currently, the active buzzer will **click** (quietly) once the motion sensor is triggered.
+The buzzer will eventually be changed to a passive buzzer. The motion sensors are too sensitive over a larger area, 
+must find a good method for adjusting its total perception, perhaps use a pipe or maybe even a 3D printed object in the 
+future. 
 
 
 
