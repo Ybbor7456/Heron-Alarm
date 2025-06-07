@@ -46,5 +46,9 @@ The buzzer will eventually be changed to a passive buzzer. The motion sensors ar
 must find a good method for adjusting its total perception, perhaps use a pipe or maybe even a 3D printed object in the 
 future. 
 
+![10000021251](https://github.com/user-attachments/assets/c425c2f2-c160-4698-9f74-214f9343d6c9)
+
+
+
 
 
