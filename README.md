@@ -1,7 +1,6 @@
 # Heron-Alarm
 Heron Detection and Alarm System
 
-# 06/02/2025
 
 For five years, one great blue heron has devastated the fish population in my parents' fish pond in their backyard.  
 Once these birds locate a source of prey, they never forget that location throughout their entire lifespan of around  
@@ -40,7 +39,7 @@ process but will likely be the MCU I use for the final product. Arduino Uno R3 i
 
 # Arduino R3, PIR HC-SR501 motion detector, active piezo buzzer.#
 
-# 06/06/25
+
 The Arduino board came in the mail today. 
 Uploaded basic code from ArduinoIDE to test. Everything seems to work. 
 Currently, the active buzzer will **click** (quietly) once the motion sensor is triggered.
@@ -48,10 +47,11 @@ The buzzer will eventually be changed to a passive buzzer. The motion sensors ar
 must find a good method for adjusting its total perception, perhaps use a pipe or maybe even a 3D printed object in the 
 future. 
 
-![10000021251](https://github.com/user-attachments/assets/c425c2f2-c160-4698-9f74-214f9343d6c9)
+# Communicating MCUs
 
 
-# 06/07/25
+
+
 
 
 
