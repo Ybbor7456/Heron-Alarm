@@ -61,7 +61,7 @@ future.
 
 
 # Communicating MCUs
-Tes ethernet (UDP/TCP), CAN, RS-485 over Cat5e.  
+ UART,CAN, RS-485.  
 
 
 
