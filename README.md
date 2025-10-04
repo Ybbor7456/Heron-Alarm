@@ -43,7 +43,7 @@ process but will likely be the MCU I use for the final product. Arduino Uno R3 i
 2. PIR HC-SR501 motion detector
 3. active piezo buzzer
 4. 2x LM2596 buck converter 
-5. 2x mutual conversion model 3.3V
+5. 2x RS-485 
 6. CAT5e
 7. CAN Receiver 
 
@@ -55,13 +55,17 @@ Uploaded basic code from ArduinoIDE to test. Everything works.
 Currently, the active buzzer will **click** (quietly) once the motion sensor is triggered.
 The buzzer will eventually be changed to a passive buzzer. The motion sensors are too sensitive over a larger area, 
 must find a good method for adjusting its total perception, perhaps use a pipe or maybe even a 3D printed object in the 
-future. 
-
-#
+future.   
 
 
-# Communicating MCUs
- UART,CAN, RS-485.  
+# Wiring RS-485. #
+Two RS-485 transceiver boards are used: one at the sender Pico and one at the receiver Pico. The transceivers convert the Pico’s UART (3.3 V logic) into a differential signal on the CAT5e pair. The RS-485 uses six onboard pins, TX, RX, DE, RE, GND and Power. TX and RX are wired to GP0 and GP1, these are the transmission and receiving pins. DE and RE stand for driver enable and receive enable, these are wired together as RE and DE are turned on and off at the same time, only requiring one shared pulse.GND goes to GND and, and power goes to power. On both MCUs the RS-485s are wired the exact same. Between the RS-485s are cat5e wires pinched into both RS-485s, labeled A, B, and GND. There is a ground pin and a ground (blue thing on rs-485). Ensure that the RS-485s are connected from A->A, B->B, and GND->GND. 
+# Wiring PIR Motion Sensor #
+The sending MCU has a  motion sensor with three pins, GND, Power, and Out. Naturally, GND and power are sent to GND and the pico’s power supply, and the out pin will be plugged into another GP pin, GP8 in this case. The MCU was powered by a USB. 
+# Wiring the Buck Converter and LED #
+The receiving MCU is powered by a 12V power supply. The internal voltage of the pi pico cannot handle 12V, so it is taken down to about 5V with a buck converter. The buck converter has ports on each side of it, one containing the positive and negative OUTPUT, and the positive and negative INPUT. The power supply is connected to the INPUT side. Once a power supply is detected, adjust the potentiometer on the buck converter to lower the output voltage to 5V. Attach the buck converter’s OUTPUT ports to + VSYS on the pico and - GND.  
+GP16 is used to send a pulse to drive the LED when indicated. 
+
 
 
 
