@@ -94,6 +94,17 @@ GP16 is used to send a pulse to drive the LED when indicated.
 Two pi picos are assigned a send and a receive role, the sender reacting to a PIR motion trigger and the receiver responding by lighting an LED. To do this, the system uses a fixed-length frame over UART through the RS-485. The sync byte, the payload byte, and the checksum byte. The receiver explicitly waits for the sync byte, staying in an idle state throughout the loop until the sync byte has been located. The payload byte is assigned to 0x01 in the receiver code, so, when the specified payload byte is sent, it indicates for the LED to flash. The checksum byte ensures that the payload byte was uncorrupted and arrived at the right location. The sender  will compute and send a check value, the receiver then recomputes that check value and matches it with the received check byte.  If the check values match, then the received frame is accepted and acted upon, otherwise it is discarded. Because the RS-485 modules are half-duplex, the Pico ties DE and RE together and drives that node from a GPIO: LOW keeps the transceiver in receive mode, and HIGH enables transmit mode only while the bytes are being sent. The sender will initialize UART, monitor the PIR motion sensors with a small debounce, and build then send the three 3-byte frame. Then the receiver initializes UART, and runs a tiny state machine that waits for the sync byte. It reads the payload byte and check byte, then verifies that the check byte values are the same, if they are the same, then the LED light is driven. RS-485 can support multiple nodes on the same A/B pair, if expanded beyond two devices, add an address byte so only the intended node acts, and if it is ever needed to be simultaneous, two-way traffic can switch to 4-wire RS-485. 
 
 
+# Wireless Sending and Receiving Pico W #
+
+# Description #
+Two pi pico Ws communicate by sending a trigger event and receiving that trigger event to light an LED over wifi using UDP. The client (sender) watches a PIR motion sensor; on a rising edge it transmits a tiny trigger message. The server (receiver) listens on a UDP port, validates the message, and drives an LED.
+
+# Wiring #
+GP16 → 330 Ω → LED → GND
+PIR (sender): VCC → 3V3, GND → GND, OUT → GP8
+
+# System Overview #
+The Pico W has a CYW43439 wireless chip which adds a Wifi and Bluetooth module to the board, allowing the microcontroller to wireless connect to the internet. The client has a PIR motion sensor, that upon a PIR edge will activate a trigger that is sent to the server side, which checks and then acts upon that event. Each board will connect to an SSID, the receiver binds a socket, and the client sends a fixed 3-byte frame.  The data sent is composed of a sync byte, payload byte, and a checksum byte. The receiver loops over the UDP socket to continuously check for sent signals. 
 
 
 
