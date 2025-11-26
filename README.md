@@ -108,6 +108,17 @@ The Pico W has a CYW43439 wireless chip which adds a Wifi and Bluetooth module t
 
 
 
+# Final Design #
+After testing different communication protocols, it has become obvious that this alarm system can function with a single MCU.  
+2x PIR Sensors (cross aimed)
+1 Siren
+1 Clock (external clock powered by volts, won't miss ticks) 
+12V DC solenoid valve 
+12V Power supply + buck converter
+
+
+
+
 
 
 
