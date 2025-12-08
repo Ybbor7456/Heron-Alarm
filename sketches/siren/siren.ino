@@ -3,9 +3,11 @@
 #include <Adafruit_GFX.h>       
 #include <Adafruit_SSD1306.h>  
 
-constexpr uint8_t POT_PIN = A0; 
-constexpr uint8_t BUTTON_PIN1 = 2;
-constexpr uint8_t BUTTON_PIN2 = 3;
+constexpr uint8_t POT_PIN = A0; // for OLED (setting schedule, battery % remaining) 26
+constexpr uint8_t VOL_PIN = A1; // for volume control 27
+constexpr uint8_t BUTTON_PIN1 = 2; // button used for siren test
+constexpr uint8_t BUTTON_PIN2 = 3; // button used for OLED selection with bool isButtonPressed()
+// pins 4 & 5 i^2c sda scl
 constexpr uint8_t PWM_PIN = 7;
 constexpr uint32_t DT  = 200;   // debounce 
 constexpr uint32_t ST = 500; 
@@ -20,14 +22,22 @@ constexpr uint16_t ADCMAX = 1023; // 2^8 = 256, use uint16
 
 // pages -> set timer, set volume
 // pages controlled by 2 buttons and a potentiometer
-static const char* ITEMS[] = {"Menu", "Time Scheduler", "Volume"};
+static const char* ITEMS[] = {"Timer", "Battery", "Volume"};
 static const int ITEM_COUNT = sizeof(ITEMS)/sizeof(ITEMS[0]);
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
- 
-enum class Page: int{Menu, Scheduler, Volume};
+enum class Page: int{Menu, Scheduler, Battery, Volume};
 Page activePage = Page::Menu;      
 uint8_t menuIndex = 0; 
+
+struct Debounce {
+  uint32_t lastChange = 0;
+  bool lastStable = true;  // INPUT_PULLUP idle = HIGH
+  bool lastRead   = true;  // last raw read
+};
+
+Debounce db_siren;   // button 1
+Debounce db_menu;   // butto 2
 
 void displaySetup(){
   if(!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
@@ -40,7 +50,7 @@ void displaySetup(){
   display.setCursor(0, 0);
   display.println(F("Hello OLED"));
   display.setTextSize(1);
-  display.println(F("Arduino UNO + I^2C"));
+  display.println(F("Pi Pico W + I^2C"));
   display.display();
   delay(1200);
 }
@@ -49,7 +59,7 @@ int adcToMenuIndex(int adc) {
   // 3 equal buckets (0..1023) -> 0,1,2 with hysteresis
   static uint8_t sel = 0;
   static int lastChange = 0;
-  int div = map(adc, 0, 1023, 0, (int)ITEM_COUNT -1); // range of 0 to 3
+  int div = map(adc, 0, 1023, 0, (int)ITEM_COUNT -1); // range of 0 to 2
 
   const int HYST = 30; // ADC counts (~3%), prevents from drastic/shaky changes in OELD
   if (div != sel) {
@@ -58,23 +68,47 @@ int adcToMenuIndex(int adc) {
   return sel;
 }
 
+bool pressedEdge(uint8_t pin, Debounce &db, uint16_t debounce_ms = 15) {
+  bool raw = digitalRead(pin);                // HIGH idle pullup
+  uint32_t now = millis();
+  if (raw != db.lastRead) {                   //  input changed
+    db.lastRead = raw;
+    db.lastChange = now;
+  }
+  if (now - db.lastChange > debounce_ms) {    
+    if (raw != db.lastStable) {         // new stable state
+      db.lastStable = raw;
+      return (db.lastStable == LOW);   //true per press
+    }
+  }
+  return false;
+}
+
 void drawMenu(int selected){
     display.clearDisplay();
     display.setTextSize(1);
     //int w = map(raw, 0, ADCMAX, 0, SCREEN_WIDTH);     // remaps v to range of 0-1023 to the width of 0 to screen width
     //w = constrain(w,0,SCREEN_WIDTH);
 
-    for(int i = 0; i < ITEM_COUNT; i++){
+    for(int i = 0; i < ITEM_COUNT ; i++){
         display.drawRect(DRAW_H, 20*i, DRAW_W, 16, SSD1306_WHITE);               // (20,0) -> (20,20) = (+0, +20)
-        display.setCursor(45, 5 +(20*i));             // (x,y) -> (0, 5) -> (+0, +20)
+        display.setCursor(25, 5 +(20*i));             // (x,y) -> (0, 5) -> (+0, +20)
         display.print(ITEMS[i]);
 
         if (i == selected) {
-        display.fillRect(DRAW_H, 20*i, DRAW_W, 16, SSD1306_BLACK);
+        display.print((i == selected) ? "> " : "  ");
   }
     }
 
    display.display(); 
+}
+
+void drawBatteryLife(){
+  display.clearDisplay(); 
+  display.setTextSize(1);
+  display.setCursor(10, 10);
+  display.print(F("Battery Life"));
+  display.display(); 
 }
 
 void drawTimeScheduler(){
@@ -85,67 +119,37 @@ void drawTimeScheduler(){
   display.display(); 
 }
 
-void drawVolumeBarScreen(){
-  int raw = analogRead(POT_PIN); 
+void drawVolumeBar(){
+  int raw = analogRead(VOL_PIN); 
   int w = map(raw, 0, ADCMAX, 0, SCREEN_WIDTH);     // remaps v to range of 0-1023 to the width of 0 to screen width
   w = constrain(w,0,SCREEN_WIDTH);
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.print(F("A0: ")); // use F to save RAM on uno
-  display.print(raw);
+  display.print(F("Volume: ")); // use F to save RAM on uno
+  int volume_range = map(raw, 0, ADCMAX, 0, 100);
+  display.print(volume_range);
 
   display.fillRect(0, 20, w, 14, SSD1306_WHITE);
   display.drawRect(0, 20, SCREEN_WIDTH, 14, SSD1306_BLACK); // change w to be affected by potentiometer. 
   display.display();
 }
 
-bool readButtonPressed() {
-  static uint32_t lastChange = 0;
-  static bool lastStable = false;
-  static bool lastRead = true;
-  bool raw = digitalRead(BUTTON_PIN2); // true if pressed
-  if (raw != lastRead) { lastRead = raw; lastChange = millis(); } ///updates last read time
-  if (millis() - lastChange > 15) {  // debounce 15ms
-    if (raw != lastStable) { lastStable = raw; return (lastStable == LOW); } // returns true
-  }
-  return false;
-}
-
 void sel_page(int raw){
-    switch(activePage){
-
-    case Page::Menu: {
-      // pot only moves HIGHLIGHT, never changes the page:
-      menuIndex = adcToMenuIndex(raw); // returns int 
-      drawMenu(menuIndex);  // menu index is controlled by potentiometer
-      if (readButtonPressed()) {
-        activePage = (menuIndex == 0) ? Page::Scheduler
-                    :  Page::Volume;                       
-      }
-    } break;
-        
-    case Page:: Scheduler:{
-        drawTimeScheduler();
-        if (readButtonPressed()) activePage = Page::Menu; 
-    } break;
-
-    case Page::Volume:{
-        drawVolumeBarScreen(); // draws bars
-        if(readButtonPressed()){
-         // analogWrite(PWM_PIN, menuIndex);
-          activePage = Page::Menu; 
-        }
-    } break;
-    }
-  //delay(100);
+  menuIndex = adcToMenuIndex(raw); // returns 0,1,2
+  switch (activePage) {
+    case Page::Menu:      drawMenu(menuIndex); break;
+    case Page::Scheduler: drawTimeScheduler();  break;
+    case Page::Volume:     drawVolumeBar(); break; 
+    case Page::Battery:   drawBatteryLife(); break;
+  }
 }
 
 void setup() {
   Serial.begin(115200);
   digitalWrite(PWM_PIN, LOW); 
   pinMode(BUTTON_PIN1, INPUT_PULLUP);
-  pinMode(BUTTON_PIN2, INPUT_PULLUP);
+  pinMode(BUTTON_PIN2, INPUT_PULLUP); //idle high
   pinMode(PWM_PIN, OUTPUT); 
   analogReadResolution(10);
   Wire.begin();
@@ -154,31 +158,43 @@ void setup() {
 }
 
 void loop() {
-  static uint8_t  pressCount = 0;     // 0..3
-  static bool     lastBtn    = HIGH;  // HIGH = not pressed
-  static uint32_t lastEdgeMs = 0;
+  static uint8_t  pressCount = 0;
   static uint32_t sirenOffAt = 0;
 
-  int raw = analogRead(POT_PIN); 
-  sel_page(raw); 
-  uint32_t now = millis();
-  bool btn = digitalRead(BUTTON_PIN1);
-  bool rising = (lastBtn == HIGH && btn == LOW);
+  int raw = analogRead(POT_PIN);
+   sel_page(raw);  
 
-  if (rising && (now - lastEdgeMs) > DT) {
-    if (pressCount < 3) {
-      ++pressCount;
-    } 
-    else { // 4th press: fire siren & reset
-      analogWrite(PWM_PIN, 50);
-      sirenOffAt = now + ST;
+  int raw2 = analogRead(VOL_PIN);
+  int duty = map(raw2, 0, ADCMAX, 0, 255); 
+  duty = constrain(duty, 0, 255);
+                    // just draws
 
+  // Get one-shot events (pressed this loop?)
+  bool menuPress  = pressedEdge(BUTTON_PIN2, db_menu);
+  bool sirenPress = pressedEdge(BUTTON_PIN1, db_siren);
+ 
+  if (menuPress) {
+  if (activePage == Page::Menu) {
+    switch (menuIndex) {
+      case 0: activePage = Page::Scheduler; break;
+      case 1: activePage = Page::Battery;   break;
+      case 2: activePage = Page::Volume;    break;
+      default: activePage = Page::Menu;     break;
+    }
+  } else {
+    activePage = Page::Menu;
+    }
+  }
+  // siren 4 press
+  if (sirenPress) {
+    if (++pressCount >= 4) {
+      analogWrite(PWM_PIN, duty);          // fixed duty for now
+      sirenOffAt = millis() + ST;
       pressCount = 0;
     }
-    lastEdgeMs = now;
   }
-  lastBtn = btn;
-  if (sirenOffAt && (int32_t)(now - sirenOffAt) >= 0) {
+  // Auto-off (you dropped this earlier)
+  if (sirenOffAt && (int32_t)(millis() - sirenOffAt) >= 0) {
     analogWrite(PWM_PIN, 0);
     sirenOffAt = 0;
   }
