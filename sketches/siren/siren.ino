@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>       
 #include <Adafruit_SSD1306.h>  
+#include <RTClib.h>
 
 constexpr uint8_t POT_PIN = A0; // for OLED (setting schedule, battery % remaining) 26
 constexpr uint8_t VOL_PIN = A1; // for volume control 27
@@ -19,6 +20,7 @@ constexpr uint16_t ADCMAX = 1023; // 2^8 = 256, use uint16
 #define DRAW_W 88
 #define OLED_RESET -1           // No reset pin on many I2C modules; share MCU reset
 #define OLED_ADDR 0x3C
+#define RTC_ADDR 0x68
 
 // pages -> set timer, set volume
 // pages controlled by 2 buttons and a potentiometer
@@ -38,6 +40,9 @@ struct Debounce {
 
 Debounce db_siren;   // button 1
 Debounce db_menu;   // butto 2
+RTC_DS3231 rtc;
+static uint32_t sirenOffAt = 0;
+
 
 void displaySetup(){
   if(!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
@@ -97,13 +102,13 @@ void drawMenu(int selected){
 
         if (i == selected) {
         display.print((i == selected) ? "> " : "  ");
-  }
+        }
     }
 
    display.display(); 
 }
 
-void drawBatteryLife(){
+void drawBatteryLife(){   // measure Rtc battery with adc 
   display.clearDisplay(); 
   display.setTextSize(1);
   display.setCursor(10, 10);
@@ -111,7 +116,7 @@ void drawBatteryLife(){
   display.display(); 
 }
 
-void drawTimeScheduler(){
+void drawTimeScheduler(){ // create scheduled time to have alarm go off using rtc
   display.clearDisplay(); 
   display.setTextSize(1);
   display.setCursor(10, 10);
@@ -120,7 +125,7 @@ void drawTimeScheduler(){
 }
 
 void drawVolumeBar(){
-  int raw = analogRead(VOL_PIN); 
+  int raw = analogRead(VOL_PIN);                    
   int w = map(raw, 0, ADCMAX, 0, SCREEN_WIDTH);     // remaps v to range of 0-1023 to the width of 0 to screen width
   w = constrain(w,0,SCREEN_WIDTH);
   display.clearDisplay();
@@ -145,34 +150,63 @@ void sel_page(int raw){
   }
 }
 
+void scheduleAlarm10s() {       // alarm goes off every 10 seconds, test - will change 
+  DateTime next = rtc.now() + TimeSpan(0,0,0,10);
+  rtc.clearAlarm(1);                        // clear flag before setting a new one
+  rtc.setAlarm1(next, DS3231_A1_Date);     //set at timestamp 
+}
+
+void alarm_loop(uint8_t duty, uint32_t duration){ // alarm fnx called in loop() that turns on s
+  if (rtc.alarmFired(1)) {
+    // Ssiren on 
+    analogWrite(PWM_PIN, duty);
+    // Re-arm for 10s later
+    scheduleAlarm10s();
+    sirenOffAt = millis() + duration; 
+  }
+}
+
 void setup() {
   Serial.begin(115200);
-  digitalWrite(PWM_PIN, LOW); 
+  Wire.begin();
+  rtc.begin(); 
+  rtc.disable32K(); // not using 32k pin 
+  //pinMode(CLOCK_INTERRUPT_PIN, INPUT_PULLUP);           // i2c components setup in wire.begin(), only in setup() for sqw pin for itnerrupts. 
+  //attachInterrupt(digitalPinToInterrupt(CLOCK_INTERRUPT_PIN), onAlarm, FALLING);
+  rtc.clearAlarm(1);
+  rtc.clearAlarm(2);
+  rtc.disableAlarm(2);
+  rtc.writeSqwPinMode(DS3231_OFF);
   pinMode(BUTTON_PIN1, INPUT_PULLUP);
   pinMode(BUTTON_PIN2, INPUT_PULLUP); //idle high
   pinMode(PWM_PIN, OUTPUT); 
+  digitalWrite(PWM_PIN, LOW); 
   analogReadResolution(10);
-  Wire.begin();
+  
   delay(100);
   displaySetup(); 
+
+  DateTime now = rtc.now();
+  DateTime next = now + TimeSpan(0,0,0,10);
+  rtc.setAlarm1(next, DS3231_A1_Date);
 }
 
 void loop() {
   static uint8_t  pressCount = 0;
-  static uint32_t sirenOffAt = 0;
+ 
 
   int raw = analogRead(POT_PIN);
-   sel_page(raw);  
+  sel_page(raw);  
 
   int raw2 = analogRead(VOL_PIN);
   int duty = map(raw2, 0, ADCMAX, 0, 255); 
   duty = constrain(duty, 0, 255);
-                    // just draws
-
-  // Get one-shot events (pressed this loop?)
+  
   bool menuPress  = pressedEdge(BUTTON_PIN2, db_menu);
   bool sirenPress = pressedEdge(BUTTON_PIN1, db_siren);
- 
+
+  alarm_loop(duty, ST); 
+
   if (menuPress) {
   if (activePage == Page::Menu) {
     switch (menuIndex) {
@@ -193,7 +227,6 @@ void loop() {
       pressCount = 0;
     }
   }
-  // Auto-off (you dropped this earlier)
   if (sirenOffAt && (int32_t)(millis() - sirenOffAt) >= 0) {
     analogWrite(PWM_PIN, 0);
     sirenOffAt = 0;
