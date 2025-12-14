@@ -6,13 +6,15 @@
 
 constexpr uint8_t POT_PIN = A0; // for OLED (setting schedule, battery % remaining) 26
 constexpr uint8_t VOL_PIN = A1; // for volume control 27
-constexpr uint8_t BUTTON_PIN1 = 2; // button used for siren test
-constexpr uint8_t BUTTON_PIN2 = 3; // button used for OLED selection with bool isButtonPressed()
+constexpr uint8_t BAT_PIN = A2; // for reading adc for battery power
+constexpr uint8_t BUTTON_PIN1 = 10; // button used for siren test
+constexpr uint8_t BUTTON_PIN2 = 11; // button used for OLED selection with bool isButtonPressed()
 // pins 4 & 5 i^2c sda scl
 constexpr uint8_t PWM_PIN = 7;
 constexpr uint32_t DT  = 200;   // debounce 
 constexpr uint32_t ST = 500; 
 constexpr uint16_t ADCMAX = 1023; // 2^8 = 256, use uint16
+constexpr float_t VREF = 3.3; 
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -28,9 +30,10 @@ static const char* ITEMS[] = {"Timer", "Battery", "Volume"};
 static const int ITEM_COUNT = sizeof(ITEMS)/sizeof(ITEMS[0]);
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-enum class Page: int{Menu, Scheduler, Battery, Volume};
+enum class Page: int{Menu, Scheduler, Battery, Volume, SetTime};
 Page activePage = Page::Menu;      
 uint8_t menuIndex = 0; 
+uint8_t subMenuIndex = 0; 
 
 struct Debounce {
   uint32_t lastChange = 0;
@@ -43,6 +46,7 @@ Debounce db_menu;   // butto 2
 RTC_DS3231 rtc;
 static uint32_t sirenOffAt = 0;
 
+DateTime now; 
 
 void displaySetup(){
   if(!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
@@ -73,6 +77,23 @@ int adcToMenuIndex(int adc) {
   return sel;
 }
 
+int adcToSubMenuIndex(int adc){
+    // when setting time in the TImeSchedule page, make sub menu from 6 buckets, be able to press a button hovering over them to increment display by 1 at a time
+    // add 1 more button for incrementing numbers, loop over 24. 
+    // [HOUR]     [MINUTE]      [SECOND] 
+    //            ___to___
+    // [HOUR]     [MINUTE]      [SECOND] 
+  static uint8_t sel = 0;
+  static int lastChange = 0;
+  int div = map(adc, 0, 1023, 0, 5); 
+  const int HYST = 30; // ADC counts (~3%), prevents from drastic/shaky changes in OELD
+  if (div != sel) {
+    if (abs(adc - lastChange) > HYST) { sel = div; lastChange = adc; }
+  }
+  return sel;
+}
+
+
 bool pressedEdge(uint8_t pin, Debounce &db, uint16_t debounce_ms = 15) {
   bool raw = digitalRead(pin);                // HIGH idle pullup
   uint32_t now = millis();
@@ -99,28 +120,56 @@ void drawMenu(int selected){
         display.drawRect(DRAW_H, 20*i, DRAW_W, 16, SSD1306_WHITE);               // (20,0) -> (20,20) = (+0, +20)
         display.setCursor(25, 5 +(20*i));             // (x,y) -> (0, 5) -> (+0, +20)
         display.print(ITEMS[i]);
-
         if (i == selected) {
         display.print((i == selected) ? "> " : "  ");
         }
     }
-
    display.display(); 
 }
 
 void drawBatteryLife(){   // measure Rtc battery with adc 
+  int voltage = analogRead(BAT_PIN); // cr2032 battery is considered dead between 2-2.7 volts, starts around 3-3.2, read voltage when power on only
+  float actualVoltage = voltage * (VREF / 1023.0); // returns real voltage
+  float v = map(actualVoltage, 0,ADCMAX, 0, 3.3);
+   
   display.clearDisplay(); 
   display.setTextSize(1);
   display.setCursor(10, 10);
-  display.print(F("Battery Life"));
+  display.print(F("Battery Life: "));
+  display.print(v); 
   display.display(); 
 }
 
-void drawTimeScheduler(){ // create scheduled time to have alarm go off using rtc
+void printDateTime(const DateTime& now) {
+  static const char* DOW[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+  Serial.print(DOW[now.dayOfTheWeek()]); Serial.print(" ");
+  Serial.print(now.year());  Serial.print("-");
+  if (now.month() < 10) Serial.print('0'); Serial.print(now.month()); Serial.print("-");
+  if (now.day()   < 10) Serial.print('0'); Serial.print(now.day());   Serial.print(" ");
+  if (now.hour()  < 10) Serial.print('0'); Serial.print(now.hour());  Serial.print(":");
+  if (now.minute()< 10) Serial.print('0'); Serial.print(now.minute());Serial.print(":");
+  if (now.second()< 10){ Serial.print('0'); Serial.println(now.second());}
+  else Serial.println(now.second()); 
+}
+
+void drawTimeScheduler(const DateTime& now, int selected){ // create scheduled time to have alarm fire, set time (every x hours for now) and display current time. 
   display.clearDisplay(); 
   display.setTextSize(1);
-  display.setCursor(10, 10);
+  display.setCursor(15, 0);
   display.print(F("Time Scheduler"));
+  display.setCursor(32,10); 
+  if (now.hour()  < 10) display.print('0'); display.print(now.hour());  display.print(":");
+  if (now.minute()< 10) display.print('0'); display.print(now.minute());display.print(":");
+  if (now.second()< 10){ display.print('0'); display.println(now.second());}
+  else display.println(now.second());  
+
+  for(int i = 1; i < ITEM_COUNT+1; i++){
+    display.drawRect(22*i, 25, 20,10,SSD1306_WHITE);
+  }
+  display.setCursor(25, 40); display.print("____to____");
+  for(int i = 1; i < ITEM_COUNT+1; i++){
+    display.drawRect(22*i, 50, 20,10, SSD1306_WHITE); 
+  }
   display.display(); 
 }
 
@@ -140,11 +189,18 @@ void drawVolumeBar(){
   display.display();
 }
 
-void sel_page(int raw){
-  menuIndex = adcToMenuIndex(raw); // returns 0,1,2
+void sel_page(int raw, const DateTime& now){
   switch (activePage) {
-    case Page::Menu:      drawMenu(menuIndex); break;
-    case Page::Scheduler: drawTimeScheduler();  break;
+    case Page::Menu:{
+      menuIndex = adcToMenuIndex(raw);
+     drawMenu(menuIndex); break;
+     break;
+    }
+    case Page::Scheduler:{
+      subMenuIndex = adcToSubMenuIndex(raw);
+      drawTimeScheduler(now, subMenuIndex);  
+      break;
+    }
     case Page::Volume:     drawVolumeBar(); break; 
     case Page::Battery:   drawBatteryLife(); break;
   }
@@ -166,6 +222,7 @@ void alarm_loop(uint8_t duty, uint32_t duration){ // alarm fnx called in loop() 
   }
 }
 
+
 void setup() {
   Serial.begin(115200);
   Wire.begin();
@@ -185,18 +242,18 @@ void setup() {
   
   delay(100);
   displaySetup(); 
-
-  DateTime now = rtc.now();
+  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  //DateTime now = rtc.now();
   DateTime next = now + TimeSpan(0,0,0,10);
   rtc.setAlarm1(next, DS3231_A1_Date);
 }
 
 void loop() {
   static uint8_t  pressCount = 0;
- 
-
+  DateTime now = rtc.now(); 
+  printDateTime(now); 
   int raw = analogRead(POT_PIN);
-  sel_page(raw);  
+  sel_page(raw, now);  
 
   int raw2 = analogRead(VOL_PIN);
   int duty = map(raw2, 0, ADCMAX, 0, 255); 
@@ -205,19 +262,19 @@ void loop() {
   bool menuPress  = pressedEdge(BUTTON_PIN2, db_menu);
   bool sirenPress = pressedEdge(BUTTON_PIN1, db_siren);
 
-  alarm_loop(duty, ST); 
+  alarm_loop(duty, ST);  // annoying when left on
 
   if (menuPress) {
-  if (activePage == Page::Menu) {
-    switch (menuIndex) {
-      case 0: activePage = Page::Scheduler; break;
-      case 1: activePage = Page::Battery;   break;
-      case 2: activePage = Page::Volume;    break;
-      default: activePage = Page::Menu;     break;
-    }
-  } else {
-    activePage = Page::Menu;
-    }
+    if (activePage == Page::Menu) {
+      switch (menuIndex) {
+        case 0: activePage = Page::Scheduler; break;
+        case 1: activePage = Page::Battery;   break;
+        case 2: activePage = Page::Volume;    break;
+        default: activePage = Page::Menu;     break;
+      }
+    } else {
+      activePage = Page::Menu;
+      }
   }
   // siren 4 press
   if (sirenPress) {
