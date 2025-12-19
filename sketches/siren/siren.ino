@@ -17,6 +17,8 @@ constexpr uint32_t DT  = 200;   // debounce
 constexpr uint32_t ST = 500; 
 constexpr uint16_t ADCMAX = 1023; // 2^8 = 256, use uint16
 constexpr float_t VREF = 3.3; 
+constexpr float_t MIN_BAT = 2; 
+constexpr float_t MAX_BAT = 3.2; 
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -91,9 +93,9 @@ int adcToMenuIndex(int adc) {
 int adcToSubMenuIndex(int adc){
     // when setting time in the TImeSchedule page, make sub menu from 6 buckets, be able to press a button hovering over them to increment display by 1 at a time
     // add 1 more button for incrementing numbers, loop over 24. 
-    // [HOUR]     [MINUTE]      [SECOND] 
+    // [HOUR]     [MINUTE]      
     //            ___to___
-    // [HOUR]     [MINUTE]      [SECOND] 
+    // [HOUR]     [MINUTE]   
   static uint8_t sel = 0;
   static int lastChange = 0;
   int div = map(adc, 0, 1023, 0, 5); 
@@ -140,13 +142,15 @@ void drawMenu(int selected){
 void drawBatteryLife(){   // measure Rtc battery with adc 
   int voltage = analogRead(BAT_PIN); // cr2032 battery is considered dead between 2-2.7 volts, starts around 3-3.2, read voltage when power on only
   float actualVoltage = voltage * (VREF / 1023.0); // returns real voltage
-  float v = map(actualVoltage, 0,ADCMAX, 0, 3.3);
-   
+  float mapped_battery = map(actualVoltage, MIN_BAT ,MAX_BAT, 0, 100); // bar from 2 to 3.2
   display.clearDisplay(); 
   display.setTextSize(1);
-  display.setCursor(10, 10);
+  display.setCursor(0, 0);
   display.print(F("Battery Life: "));
-  display.print(v); 
+  display.print(mapped_battery); 
+  
+  display.fillRect(0, 20, mapped_battery, 14, SSD1306_WHITE);
+  display.drawRect(0, 20, SCREEN_WIDTH, 14, SSD1306_BLACK);
   display.display(); 
 }
 
@@ -172,13 +176,13 @@ void handleSchedulerInput(uint8_t pinInc, Debounce& dbInc, uint8_t pinNext, Debo
       case 0: s.start.h = (s.start.h + 1) % 24; break;
       case 1: s.start.m = (s.start.m + 1) % 60; break;
       case 2: s.end.h   = (s.end.h   + 1) % 24; break;
-      case 3: s.end.m   = (s.end.m   + 1) % 60; break;
+      case 3: s.end.m   = (s.end.m   + 1) % 60; break;      // rtc.adjust(HH:MM:SS)
     }
   Serial.print("Start time:");  if (s.start.h < 10) Serial.print('0'); Serial.print(s.start.h);
   Serial.print(":");   if (s.start.m < 10) Serial.print('0'); Serial.print(s.start.m);
   Serial.print("\n"); 
-  Serial.print("End Time:");if (s.end.h   < 10) Serial.print('0'); Serial.print(s.end.h);
-  Serial.print(":");   if (s.end.m   < 10) Serial.print('0'); Serial.print(s.end.m);
+  Serial.print("End Time:");if (s.end.h < 10) Serial.print('0'); Serial.print(s.end.h);
+  Serial.print(":");   if (s.end.m < 10) Serial.print('0'); Serial.print(s.end.m);
   Serial.print("\n");
   }
 }
@@ -264,13 +268,14 @@ void sel_page(int raw, const DateTime& now){
 }
 
 void scheduleAlarm10s() {       // alarm goes off every 10 seconds, test - will change 
-  DateTime next = rtc.now() + TimeSpan(0,0,0,10);
+  DateTime next = rtc.now() + TimeSpan(0,0,0,3);
   rtc.clearAlarm(1);                        // clear flag before setting a new one
   rtc.setAlarm1(next, DS3231_A1_Date);     //set at timestamp 
 }
 
 void alarm_loop(uint8_t duty, uint32_t duration){ // alarm fnx called in loop() that turns on s
   if (rtc.alarmFired(1)) {
+    Serial.print("Alarm fired \n");
     // Ssiren on 
     analogWrite(PWM_PIN, duty);
     // Re-arm for 10s later
@@ -300,7 +305,11 @@ void setup() {
   
   delay(100);
   displaySetup(); 
-  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  
+  if (rtc.lostPower()) { 
+    Serial.println("RTC lost power, setting time from compile time..."); // Set from the time this sketch was compiled: 
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); 
+  } 
   //DateTime now = rtc.now();
   DateTime next = now + TimeSpan(0,0,0,10);
   rtc.setAlarm1(next, DS3231_A1_Date);
@@ -310,10 +319,12 @@ void loop() {
   static uint8_t  pressCount = 0;
    
   DateTime now = rtc.now(); 
-  
+
   bool sirenPress = pressedEdge(BUTTON_PIN1, db_siren);
   bool menuPress  = pressedEdge(BUTTON_PIN2, db_menu);
-  //alarm_loop(duty, ST);  // annoying when left on
+  //int duty2 = map(analogRead(VOL_PIN), 0, ADCMAX, 0, 255);
+  //duty2 = constrain(duty2, 0, 255);
+  //alarm_loop(duty2, ST);  // annoying when left on
   // printDateTime(now); 
   if (menuPress && activePage != Page::Menu) {
     activePage = Page::Menu;
@@ -326,7 +337,6 @@ void loop() {
   if (activePage == Page::Scheduler) { // call handle schedule if page is sub menu scheduler 
       handleSchedulerInput(BUTTON_PIN3, db_inc, BUTTON_PIN4, db_next, nxt);
   } 
-    
   else { // if not submnu schedule, do normal OLED routine 
       if (menuPress) {
         if (activePage == Page::Menu) {
@@ -340,20 +350,22 @@ void loop() {
           activePage = Page::Menu;
         }
       }
-
       // 4-press siren test
       if (sirenPress) {
+        Serial.print("Button pressed \n");
         if (++pressCount >= 4) {
+          Serial.print("press count is 4 \n"); // siren not going off
           int duty = map(analogRead(VOL_PIN), 0, ADCMAX, 0, 255);
           duty = constrain(duty, 0, 255);
           analogWrite(PWM_PIN, duty);
+          Serial.print(duty); 
           sirenOffAt = millis() + ST;
           pressCount = 0;
         }
       }
   }
-
   if (sirenOffAt && (int32_t)(millis() - sirenOffAt) >= 0) {
+    //Serial.print("off \n"); 
     analogWrite(PWM_PIN, 0);
     sirenOffAt = 0;
   }
@@ -361,3 +373,13 @@ void loop() {
   sel_page(raw, now);
   delay(10); // small delay
 }
+
+
+
+/* what's remaining?
+1. use start and end times for RTC lost power, s.start.h, s.end.h, s.start.m, s.end.m, b4 stting values, figure out how to set a timer for RTC. rtc.setAlarm1(now + TimeSpan(0,0,0,30), DS3231_A1_Second);
+2. measure and display rtc battery (done)
+3. highside P mosfet for turning sensors off
+4. implement sensors instead of pushbutton to fire siren
+5. sensor logic so one edge does not fire siren 
+*/
