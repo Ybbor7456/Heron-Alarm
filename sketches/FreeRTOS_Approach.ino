@@ -34,7 +34,7 @@ static const int ITEM_COUNT = sizeof(ITEMS)/sizeof(ITEMS[0]);
 constexpr uint16_t BAT_PIN = 13;  // measures battery (not wired yet)
 constexpr uint16_t time_nxt_btn = 25; // next time slot in sub menu
 constexpr uint16_t PWM_pin = 26;      // sends signal to mosfet -> fire alarm 
-constexpr uint16_t siren_btn_pin = 27; 
+constexpr uint16_t siren_btn_pin = 27;  // fires siren 
 constexpr uint16_t menu_button_pin = 32; // clicks menu
 constexpr uint16_t time_inc_btn = 33; // inc time in sub menu
 constexpr uint16_t VOL_POT = 34;      // controls volume through PWM intensity (not in use yet)
@@ -45,7 +45,8 @@ enum class UiEventType : uint8_t{
   HighlightChanged, 
   SelectPressed, 
   IncPressed, 
-  NextPressed
+  NextPressed,
+  SirenPressed
 };
 
 enum class Screen : uint8_t{
@@ -67,6 +68,7 @@ struct Debounce {
 Debounce db_menu; 
 Debounce db_inc; 
 Debounce db_nxt;
+Debounce db_pwm; 
 
 struct TimeHM { uint8_t h=0, m=0; }; // default set times
 
@@ -131,6 +133,7 @@ void ButtonTask(void *pv){
   for(;;){
     if(pressedEdge(menu_button_pin, db_menu, 15)){
       UiEvent ev1; 
+      //Serial.print("menu button pressed"); 
       ev1.type = UiEventType::SelectPressed; 
       ev1.index = 0; 
 
@@ -151,13 +154,24 @@ void ButtonTask(void *pv){
       }
     }
     if(pressedEdge(time_nxt_btn, db_nxt, 15)){
-      UiEvent ev2; 
-      ev2.type = UiEventType::NextPressed; 
-      if(xQueueSend(uiEventQ, &ev2, 0)!= pdTRUE){
+      UiEvent ev3; 
+      ev3.type = UiEventType::NextPressed; 
+      if(xQueueSend(uiEventQ, &ev3, 0)!= pdTRUE){
         UiEvent junk; 
         xQueueReceive(uiEventQ, &junk, 0); 
-        xQueueSend(uiEventQ, &ev2, 0); 
+        xQueueSend(uiEventQ, &ev3, 0); 
       }
+    }
+    if(pressedEdge(siren_btn_pin, db_pwm, 15)){
+      UiEvent ev4; 
+      //Serial.print(digitalRead(siren_btn_pin));
+      ev4.type = UiEventType::SirenPressed;
+      if(xQueueSend(uiEventQ, &ev4, 0)!= pdTRUE){
+        UiEvent junk;   
+        xQueueReceive(uiEventQ, &junk, 0); 
+        xQueueSend(uiEventQ, &ev4, 0); 
+        //Serial.print(digitalRead(siren_btn_pin));
+      } 
     }
    vTaskDelay(pdMS_TO_TICKS(5));  
   }
@@ -283,6 +297,11 @@ static void handleSchedulerEvent(UiEventType type, SchedulerState &s) {
   }
 }
 
+static int calculateDuty(){
+  int raw = analogRead(VOL_POT); 
+  int w = map(raw, 0, ADCMAX, 0, 255); 
+  return w; 
+} 
 
 void UiTask(void *pv) {
   Screen screen = Screen::Menu;
@@ -310,6 +329,7 @@ void UiTask(void *pv) {
         case UiEventType::SelectPressed:
           // On menu enter the selected page
           // On page  go back to Menu
+          Serial.println("menu button pressed"); 
           if (screen == Screen::Menu) {
             if (highlightIndex == 0) screen = Screen::Timer;
             else if (highlightIndex == 1) screen = Screen::Battery;
@@ -325,9 +345,17 @@ void UiTask(void *pv) {
             handleSchedulerEvent(ev.type, sched);
           }
           break;
+
+        case UiEventType::SirenPressed:{
+          Serial.println("Alarm button pressed"); 
+          int duty = calculateDuty();
+          analogWrite(PWM_pin, duty); 
+          vTaskDelay(pdMS_TO_TICKS(500)); 
+          analogWrite(PWM_pin, 0); 
+          break; 
+        }
       }
     }
-
     // render based on current stat
     switch (screen) {
       case Screen::Menu:    drawMenu(highlightIndex); break;
@@ -359,7 +387,9 @@ void setup() {
   pinMode(menu_button_pin, INPUT_PULLUP);
   pinMode(time_inc_btn, INPUT_PULLUP);
   pinMode(time_nxt_btn, INPUT_PULLUP); 
-  pinMode(PWM_pin, LOW); 
+  pinMode(siren_btn_pin, INPUT_PULLUP); 
+  pinMode(PWM_pin, OUTPUT); 
+  digitalWrite(PWM_pin, LOW); 
 
   analogSetPinAttenuation(ADC_MENU_POT, ADC_11db);
   analogReadResolution(12);
