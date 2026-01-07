@@ -21,11 +21,18 @@ RS-485, and CAN approaches, along with alternative parts more suitable for testi
 
 ## Essentials ## 
 1. 100 - 330Ω resistor
-2. PIR HC-SR501 motion detector
-3. IRLZ44N MOSFET
-4. 12V Siren
-5. At least 1 Pi Pico.
-6. Buck converter or linear regulator.   
+2. 10KΩ resistor
+3. PIR HC-SR501 motion detector
+4. IRLZ44N MOSFET
+5. 12V Siren
+6. Inline Fuse Holder
+7. 3A Fuse
+8. OLED Screen
+9. 4 Pushbuttons
+10. RTC + Battery
+11. At least 1 Pi Pico.
+12. Buck converter or linear regulator.
+13. ESP32 (FreeRTOS approach)  
 
 ## Wireless ##
 1. 2x pi pico W
@@ -92,3 +99,17 @@ PIR (sender): VCC → 3V3, GND → GND, OUT → GP8
 
 ## System Overview ##
 The Pico W has a CYW43439 wireless chip which adds a Wifi and Bluetooth module to the board, allowing the microcontroller to wireless connect to the internet. The client has a PIR motion sensor, that upon a PIR edge will activate a trigger that is sent to the server side, which checks and then acts upon that event. Each board will connect to an SSID, the receiver binds a socket, and the client sends a fixed 3-byte frame.  The data sent is composed of a sync byte, payload byte, and a checksum byte. The receiver loops over the UDP socket to continuously check for sent signals. 
+
+# FreeRTOS Approach #
+Removing the need for the Arduino super loop(), set tasks and use xQueueSend/Receive(() to activate tasks by event signals. 
+
+## Wiring ##
+SCL (OLED and RTC) - GPIO22
+SDA (OLED and RTC) - GPIO21
+MOSFET: Gate - PWM GPIO. Drain - 12V Siren GND. Source - Common Ground
+4 GPIO (25, 27, 32, 33) for corresponding push buttons. 
+3 ADC Pins, Battery Life, Volume Potentiometer, Screen Selection Potentiometer (GPIO 13, 34, 35) 
+VCC and GND for ESP32, RTC, and OLED. 
+
+
+
